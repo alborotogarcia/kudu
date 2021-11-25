@@ -1,0 +1,475 @@
+---
+# Source: kudu/templates/kudu-service.yaml
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: kudu-tserver-pdb
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: kudu-tserver
+---
+# Source: kudu/templates/kudu-service.yaml
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.------
+apiVersion: v1
+kind: Service
+metadata:
+  name: "kudu-masters"
+  namespace: "storage"
+  labels:
+    app: "kudu-master"
+    heritage: "Helm"
+    release: "kudu"
+    chart: "kudu-1"
+    component: "kududb"
+spec:
+  clusterIP: None
+  ports:
+    - name: "rpc-port"
+      port: 8051
+    - name: "ui"
+      port: 8050
+  selector:
+    app: "kudu-master"
+---
+# Source: kudu/templates/kudu-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: "kudu-master-ui"
+  namespace: "storage"
+  labels:
+    app: "kudu-master"
+    heritage: "Helm"
+    release: "kudu"
+    chart: "kudu-1"
+    component: "kududb"
+spec:
+  ports:
+    - name: "rpc-port"
+      port: 8051
+    - name: "ui"
+      port: 8050
+  selector:
+    app: "kudu-master"
+  type: NodePort
+---
+# Source: kudu/templates/kudu-service.yaml
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: kudu-master-pdb
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: kudu-master
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "kudu-tservers"
+  namespace: "storage"
+  labels:
+    app: "kudu-tserver"
+    heritage: "Helm"
+    release: "kudu"
+    chart: "kudu-1"
+    component: "kududb"
+spec:
+  clusterIP: None
+  ports:
+    - name: "rpc-port"
+      port: 7051
+    - name: "ui"
+      port: 7050
+  selector:
+    app: "kudu-tserver"
+---
+# Source: kudu/templates/kudu-service.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "kudu-master"
+  namespace: "storage"
+  labels:
+    app: "kudu-master"
+    heritage: "Helm"
+    release: "kudu"
+    chart: "kudu-1"
+    component: "kududb"
+spec:
+  serviceName: "kudu-masters"
+  podManagementPolicy: Parallel
+  
+  replicas: 3
+  
+  volumeClaimTemplates:
+    - metadata:
+        name: datadir0
+        annotations:
+          volume.beta.kubernetes.io/storage-class: longhorn
+        labels:
+          heritage: "Helm"
+          release: "kudu"
+          chart: "kudu-1"
+          component: "kududb"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: datadir1
+        annotations:
+          volume.beta.kubernetes.io/storage-class: longhorn
+        labels:
+          heritage: "Helm"
+          release: "kudu"
+          chart: "kudu-1"
+          component: "kududb"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: datadir2
+        annotations:
+          volume.beta.kubernetes.io/storage-class: longhorn
+        labels:
+          heritage: "Helm"
+          release: "kudu"
+          chart: "kudu-1"
+          component: "kududb"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      
+      partition: 0
+      
+  selector:
+    matchLabels:
+      app: "kudu-master"
+  template:
+    metadata:
+      
+      labels:
+        app: "kudu-master"
+        heritage: "Helm"
+        release: "kudu"
+        chart: "kudu-1"
+        component: "kududb"
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+      - name: "kudu-master"
+        image: "apache/kudu:latest"
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: FS_WAL_DIR
+          value: /mnt/disk0
+        - name: FS_DATA_DIRS
+        
+          value: "/mnt/disk1,/mnt/disk2"
+        
+        - name: KUDU_MASTERS
+          value: "kudu-master-0.kudu-masters.$(NAMESPACE).svc.cluster.local,kudu-master-1.kudu-masters.$(NAMESPACE).svc.cluster.local,kudu-master-2.kudu-masters.$(NAMESPACE).svc.cluster.local"
+        resources:
+        
+          limits:
+            cpu: 1
+            memory: 0.5Gi
+          requests:
+            cpu: 1
+            memory: 0.5Gi
+        
+        args:
+        
+          - "master"
+        
+        ports:
+          - containerPort: 8051
+            name: "rpc-port"
+          - containerPort: 8050
+            name: "ui"
+        volumeMounts:
+          - name: datadir0
+            mountPath: /mnt/disk0
+          - name: datadir1
+            mountPath: /mnt/disk1
+          - name: datadir2
+            mountPath: /mnt/disk2
+      volumes:
+        - name: datadir0
+          hostPath:
+            path: /mnt/disks/ssd0
+        - name: datadir1
+          hostPath:
+            path: /mnt/disks/ssd1
+        - name: datadir2
+          hostPath:
+            path: /mnt/disks/ssd2
+      affinity:
+        
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - "kudu-master"
+                topologyKey: kubernetes.io/hostname
+# POD Disruption Budgets for high availability
+---
+# Source: kudu/templates/kudu-service.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "kudu-tserver"
+  namespace: "storage"
+  labels:
+    app: "kudu-tserver"
+    heritage: "Helm"
+    release: "kudu"
+    chart: "kudu-1"
+    component: "kududb"
+spec:
+  serviceName: "kudu-tservers"
+  podManagementPolicy: Parallel
+  
+  replicas: 3
+  
+  volumeClaimTemplates:
+    - metadata:
+        name: datadir0
+        annotations:
+          volume.beta.kubernetes.io/storage-class: longhorn
+        labels:
+          heritage: "Helm"
+          release: "kudu"
+          chart: "kudu-1"
+          component: "kududb"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: datadir1
+        annotations:
+          volume.beta.kubernetes.io/storage-class: longhorn
+        labels:
+          heritage: "Helm"
+          release: "kudu"
+          chart: "kudu-1"
+          component: "kududb"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi
+    - metadata:
+        name: datadir2
+        annotations:
+          volume.beta.kubernetes.io/storage-class: longhorn
+        labels:
+          heritage: "Helm"
+          release: "kudu"
+          chart: "kudu-1"
+          component: "kududb"
+      spec:
+        accessModes:
+          - "ReadWriteOnce"
+        storageClassName: longhorn
+        resources:
+          requests:
+            storage: 5Gi
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      
+      partition: 0
+      
+  selector:
+    matchLabels:
+      app: "kudu-tserver"
+  template:
+    metadata:
+      
+      labels:
+        app: "kudu-tserver"
+        heritage: "Helm"
+        release: "kudu"
+        chart: "kudu-1"
+        component: "kududb"
+    spec:
+      imagePullSecrets:
+        - name: regcred
+      containers:
+      - name: "kudu-tserver"
+        image: "apache/kudu:latest"
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: FS_WAL_DIR
+          value: /mnt/disk0
+        - name: FS_DATA_DIRS
+        
+          value: "/mnt/disk1,/mnt/disk2"
+        
+        - name: KUDU_MASTERS
+          value: "kudu-master-0.kudu-masters.$(NAMESPACE).svc.cluster.local,kudu-master-1.kudu-masters.$(NAMESPACE).svc.cluster.local,kudu-master-2.kudu-masters.$(NAMESPACE).svc.cluster.local"
+        resources:
+        
+          limits:
+            cpu: 1
+            memory: 1Gi
+          requests:
+            cpu: 1
+            memory: 1Gi
+        
+        args:
+        
+          - "tserver"
+        
+        ports:
+          - containerPort: 7051
+            name: "rpc-port"
+          - containerPort: 7050
+            name: "ui"
+        volumeMounts:
+          - name: datadir0
+            mountPath: /mnt/disk0
+          - name: datadir1
+            mountPath: /mnt/disk1
+          - name: datadir2
+            mountPath: /mnt/disk2
+      volumes:
+        - name: datadir0
+          hostPath:
+            path: /mnt/disks/ssd0
+        - name: datadir1
+          hostPath:
+            path: /mnt/disks/ssd1
+        - name: datadir2
+          hostPath:
+            path: /mnt/disks/ssd2
+      affinity:
+        
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - "kudu-tserver"
+                topologyKey: kubernetes.io/hostname
+# POD Disruption Budgets for high availability
+---
+# Source: kudu/templates/tests/health-test.yaml
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Helm test pod, to check the health of kudu cluster.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "kudu-test"
+  namespace: "storage"
+  annotations:
+    "helm.sh/hook": test-success
+spec:
+  imagePullSecrets:
+    - name: regcred
+  containers:
+    - name: "client-test"
+      image: "apache/kudu:latest"
+      imagePullPolicy: "IfNotPresent"
+      env:
+      - name: NAMESPACE
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.namespace
+      command:
+        - "kudu"
+        - "cluster"
+        - "ksck"
+        - "kudu-master-0.kudu-masters.$(NAMESPACE).svc.cluster.local,kudu-master-1.kudu-masters.$(NAMESPACE).svc.cluster.local,kudu-master-2.kudu-masters.$(NAMESPACE).svc.cluster.local"
+  restartPolicy: Never
